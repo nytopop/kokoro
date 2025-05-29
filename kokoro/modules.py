@@ -169,7 +169,7 @@ class DurationEncoder(nn.Module):
                     x, batch_first=True)
                 x = F.dropout(x, p=self.dropout, training=False)
                 x = x.transpose(-1, -2)
-                x_pad = torch.zeros([x.shape[0], x.shape[1], m.shape[-1]], device=x.device)
+                x_pad = torch.zeros([x.shape[0], x.shape[1], m.shape[-1]], device=x.device, dtype=x.dtype)
                 x_pad[:, :, :x.shape[-1]] = x
                 x = x_pad
 

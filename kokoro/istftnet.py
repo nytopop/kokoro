@@ -248,7 +248,7 @@ class SourceModuleHnNSF(nn.Module):
         # source for harmonic branch
         with torch.no_grad():
             sine_wavs, uv, _ = self.l_sin_gen(x)
-        sine_merge = self.l_tanh(self.l_linear(sine_wavs))
+        sine_merge = self.l_tanh(self.l_linear(sine_wavs.to(x.dtype)))
         # source for noise branch, in the same shape as uv
         noise = torch.randn_like(uv) * self.sine_amp / 3
         return sine_merge, noise, uv
@@ -305,7 +305,7 @@ class Generator(nn.Module):
             har = torch.cat([har_spec, har_phase], dim=1)
         for i in range(self.num_upsamples):
             x = F.leaky_relu(x, negative_slope=0.1) 
-            x_source = self.noise_convs[i](har)
+            x_source = self.noise_convs[i](har.to(x.dtype))
             x_source = self.noise_res[i](x_source, s)
             x = self.ups[i](x)
             if i == self.num_upsamples - 1:
