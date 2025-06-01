@@ -136,6 +136,79 @@ class KModel(torch.nn.Module):
         logger.debug(f"pred_dur: {pred_dur}")
         return self.Output(audio=audio, pred_dur=pred_dur) if return_output else audio
 
+    @torch.no_grad()
+    def forward_batch_with_tokens(
+        self,
+        styles: torch.FloatTensor,       # B x 510 x 1 x 256
+        input_ids: torch.LongTensor,     # B x S
+        input_lengths: torch.LongTensor, # B
+        speed: float,
+    ) -> tuple[torch.FloatTensor, torch.LongTensor]:
+        packs = styles[torch.arange(styles.shape[0]), input_lengths-1, :, :].squeeze(1)
+
+        # batch mask
+        text_mask = torch.arange(input_lengths.max()).unsqueeze(0).expand(input_lengths.shape[0], -1).type_as(input_lengths)
+        text_mask = torch.gt(text_mask+1, input_lengths.unsqueeze(1)).to(self.device)
+
+        bert_dur = self.bert(input_ids, attention_mask=(~text_mask).int())
+
+        d_en = self.bert_encoder(bert_dur).transpose(-1, -2)
+        s = packs[:, 128:]
+
+        # duration prediction
+        d = self.predictor.text_encoder(d_en, s, input_lengths, text_mask)
+        x, _ = self.predictor.lstm(d)
+        duration = self.predictor.duration_proj(x)
+        duration = torch.sigmoid(duration).sum(axis=-1) / speed
+        pred_dur = torch.round(duration).clamp(min=1).long().squeeze(1)
+
+        updated_seq_lengths = torch.sum(pred_dur, dim=-1) # b
+        max_frames = updated_seq_lengths.max()
+        # apply durations to indices
+        indices = [
+            torch.repeat_interleave(torch.arange(input_ids.shape[1], device=self.device), pred_dur[idx])
+            for idx in range(pred_dur.shape[0])
+        ]
+        indices = rnn.pad_sequence(indices)
+
+        # one-hot alignment between input tokens and output frames
+        pred_aln_trg = torch.zeros((*input_ids.shape, indices.shape[0]), device=self.device)
+        for idx in range(pred_aln_trg.shape[0]):
+            pred_aln_trg[idx, indices[:, idx], torch.arange(indices.shape[0])] = 1
+
+        # f0 and N prediction
+        en = d.transpose(-1, -2) @ pred_aln_trg
+        F0_pred, N_pred = self.predictor.F0Ntrain(en, s)
+
+        # decode
+        t_en = self.text_encoder(input_ids, input_lengths, text_mask)
+        asr = t_en @ pred_aln_trg
+
+        with torch.no_grad():
+            audios = self.decoder(asr, F0_pred, N_pred, packs[:, :128]).squeeze(1)
+
+        audio_lens = updated_seq_lengths * (audios.shape[-1]//max_frames)
+        return audios.float(), audio_lens.long()
+
+    def forward_batch(
+        self,
+        styles: torch.FloatTensor, # B x 510 x 1 x 256
+        phonemes: List[str],       # B
+        speed: float = 1,
+    ) -> tuple[torch.FloatTensor, torch.LongTensor]:
+        styles = styles.to(device=self.device)
+
+        def tokenize(phonemes: str) -> torch.LongTensor:
+            toks = list(filter(lambda i: i is not None, map(lambda p: self.vocab.get(p), phonemes)))
+            assert len(toks)+2 <= self.context_length, (len(toks)+2, self.context_length)
+            return torch.tensor([0, *toks, 0], dtype=torch.long)
+
+        toks = [tokenize(item) for item in phonemes]
+        lens = torch.tensor([t.shape[0] for t in toks], dtype=torch.long).to(self.device)
+        toks = rnn.pad_sequence(toks, batch_first=True).to(self.device)
+
+        return self.forward_batch_with_tokens(styles, toks, lens, speed=speed)
+
 class KModelForONNX(torch.nn.Module):
     def __init__(self, kmodel: KModel):
         super().__init__()
