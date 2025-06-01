@@ -5,6 +5,7 @@ from huggingface_hub import hf_hub_download
 from loguru import logger
 from transformers import AlbertConfig
 from typing import Dict, Optional, Union, List
+from torch.nn.utils import rnn
 import json
 import torch
 
