@@ -167,6 +167,8 @@ class KModel(torch.nn.Module):
         duration = torch.sigmoid(duration).sum(axis=-1) / speed
         pred_dur = torch.round(duration).clamp(min=1).long().squeeze(1)
 
+        updated_seq_lengths = torch.sum(pred_dur, dim=-1) # b
+        max_frames = updated_seq_lengths.max()
         # apply durations to indices
         indices = [
             torch.repeat_interleave(torch.arange(input_ids.shape[1], device=self.device), pred_dur[idx])
@@ -190,7 +192,7 @@ class KModel(torch.nn.Module):
         with torch.no_grad():
             audios = self.decoder(asr, F0_pred, N_pred, packs[:, :128]).squeeze(1)
 
-        audio_lens = (input_lengths) * 1800
+        audio_lens = updated_seq_lengths * (audios.shape[-1]//max_frames)
         return audios.float(), audio_lens.long()
 
     def forward_batch(
