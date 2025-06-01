@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from huggingface_hub import hf_hub_download
 from loguru import logger
 from transformers import AlbertConfig
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Union, List
 import json
 import torch
 
