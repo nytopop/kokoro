@@ -149,7 +149,7 @@ class KModel(torch.nn.Module):
         input_lengths: torch.LongTensor, # B
         speed: float,
     ) -> tuple[torch.FloatTensor, torch.LongTensor]:
-        packs = styles[torch.arange(styles.shape[0]), input_lengths, :, :].squeeze(1)
+        packs = styles[torch.arange(styles.shape[0]), input_lengths-1, :, :].squeeze(1)
 
         # batch mask
         text_mask = torch.arange(input_lengths.max()).unsqueeze(0).expand(input_lengths.shape[0], -1).type_as(input_lengths)
